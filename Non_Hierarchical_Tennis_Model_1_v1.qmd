@@ -1,0 +1,186 @@
+---
+title: "Non Hierarchical Tennis Model 1 v1"
+format:
+  html:
+    toc: true
+    code-tools: true
+    code-line-numbers: true
+    number-sections: true
+    mainfont: Georgia, serif
+editor: source
+---
+
+## 
+
+```{r}
+if (!require(tidybayes)) {
+    install.packages("tidybayes")
+    library(tidybayes)
+}
+
+if (!require(brms)) {
+    install.packages("brms")
+    library(brms)
+}
+
+if(!require(ggplot2)) {
+  install.packages("ggplot2")
+  library(ggplot2)
+}
+
+if (!require(metadat)) {
+  install.packages("metadat")
+  library(metadat)
+}
+
+if(!require(cmdstanr)){
+    install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
+    library(cmdstanr)
+}
+cmdstan_installed <- function(){
+  res <- try(out <- cmdstanr::cmdstan_path(), silent = TRUE)
+  !inherits(res, "try-error")
+}
+if(!cmdstan_installed()){
+    install_cmdstan()
+}
+```
+
+```{r}
+df <- read.csv("master-v1.csv")
+
+head(df)
+```
+
+Extract relevant data
+
+```{r}
+df_main <- df[c("ServerWon", "BreakPoint", "Tiebreaker")]
+df_sample <- df_main[sample(nrow(df_main), nrow(df_main) / 3), ]
+
+str(df_main$ServerWon)
+str(df_main$BreakPoint)
+str(df_main$Tiebreaker)
+
+mean(na.omit(df_main$ServerWon))
+```
+
+Fit model
+
+```{r}
+
+fit <- brm(
+    formula = ServerWon ~ BreakPoint + Tiebreaker,
+    data = df_main,
+    family = bernoulli(link = "logit"),
+    prior = c(
+      prior(normal(0,2^2), class = "Intercept"),
+      prior(normal(0,1^2), class = "b")
+    ),
+    chains = 4,
+    iter = 2000,
+    cores = 4
+)
+
+```
+
+Subset:
+
+```{r}
+fit_sample <- brm(
+    formula = ServerWon ~ BreakPoint + Tiebreaker,
+    data = df_sample,
+    family = bernoulli(link = "logit"),
+    prior = c(
+      prior(normal(0,2^2), class = "Intercept"),
+      prior(normal(0,1^2), class = "b")
+    ),
+    chains = 2,
+    iter = 1000,
+    cores = 2
+)
+```
+
+```{r}
+summary(fit_sample)
+```
+
+pp_check for sample
+
+```{r}
+pp_check(fit_sample)
+```
+
+Checking results
+
+```{r}
+
+summary(fit)
+
+```
+
+Win probabilities
+
+```{r}
+
+post <- spread_draws(fit, b_Intercept, b_BreakPoint, b_Tiebreaker)
+
+p_alpha <- inv_logit_scaled(post$b_Intercept)
+p_bp <- inv_logit_scaled(post$b_Intercept+post$b_BreakPoint)
+p_tb <- inv_logit_scaled(post$b_Intercept+post$b_Tiebreaker)
+
+mean(p_alpha)
+mean(p_bp)
+mean(p_tb)
+
+
+
+library(tidybayes)
+library(dplyr)
+library(ggplot2)
+
+post <- spread_draws(fit, b_Intercept, b_BreakPoint, b_Tiebreaker) %>%
+  mutate(
+    p_regular  = plogis(b_Intercept),
+    p_break    = plogis(b_Intercept + b_BreakPoint),
+    p_tiebreak = plogis(b_Intercept + b_Tiebreaker)
+  ) %>%
+  select(.draw, p_regular, p_break, p_tiebreak) %>%
+  pivot_longer(-.draw, names_to = "situation", values_to = "p")
+
+ggplot(post, aes(x = p, y = situation)) +
+  stat_pointinterval(.width = c(.5, .8, .95)) +
+  xlim(0, 1) +
+  labs(x = "P(server wins point)", y = NULL)
+```
+
+MCMC Plots
+
+```{r}
+library(brms)
+
+# trace plots
+mcmc_plot(fit,
+          pars = c("b_Intercept", "b_BreakPoint", "b_Tiebreaker"),
+          type = "trace")
+
+# overlaid posterior densities by chain
+mcmc_plot(fit,
+          pars = c("b_Intercept", "b_BreakPoint", "b_Tiebreaker"),
+          type = "dens_overlay")
+
+```
+
+Posterior predictive plots
+
+```{r}
+# compare observed vs predicted proportion of 1's
+pp_check(fit, type = "bars")          # barplot of y vs yrep
+
+# check mean statistic
+pp_check(fit, type = "stat", stat = "mean")
+
+# if you want distribution of y (0/1) counts
+pp_check(fit, type = "hist")
+
+```
