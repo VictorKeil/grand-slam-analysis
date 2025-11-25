@@ -1,0 +1,285 @@
+---
+title: "Non Hierarchical Tennis Model 1 v1"
+format:
+  html:
+    toc: true
+    code-tools: true
+    code-line-numbers: true
+    number-sections: true
+    mainfont: Georgia, serif
+editor: source
+---
+
+## 
+
+```{r}
+if (!require(tidybayes)) {
+    install.packages("tidybayes")
+    library(tidybayes)
+}
+
+if (!require(tidyr)) {
+    install.packages("tidyr")
+    library(tidyr)
+}
+
+if (!require(brms)) {
+    install.packages("brms")
+    library(brms)
+}
+
+if(!require(ggplot2)) {
+  install.packages("ggplot2")
+  library(ggplot2)
+}
+
+if(!require(reliabilitydiag)) {
+  install.packages("reliabilitydiag")
+  library(reliabilitydiag)
+}
+
+
+if (!require(metadat)) {
+  install.packages("metadat")
+  library(metadat)
+}
+
+if(!require(cmdstanr)){
+    install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
+    library(cmdstanr)
+}
+cmdstan_installed <- function(){
+  res <- try(out <- cmdstanr::cmdstan_path(), silent = TRUE)
+  !inherits(res, "try-error")
+}
+if(!cmdstan_installed()){
+    install_cmdstan()
+}
+```
+
+```{r}
+data <- read.csv("master-sub.csv")
+
+head(data)
+```
+
+Extract relevant data
+
+```{r}
+df <- data[c("ServerWon", "BreakPoint", "Tiebreaker")]
+
+str(df$ServerWon)
+str(df$BreakPoint)
+str(df$Tiebreaker)
+
+# mean(na.omit(df$ServerWon))
+```
+
+Fit model
+
+```{r}
+
+fit <- brm(
+    formula = ServerWon ~ BreakPoint + Tiebreaker,
+    data = df,
+    family = bernoulli(link = "logit"),
+    prior = c(
+      prior(normal(0,2^2), class = "Intercept"),
+      prior(normal(0,1^2), class = "b")
+    ),
+    chains = 4,
+    iter = 2000,
+    cores = 4
+)
+
+```
+
+Checking results
+
+```{r}
+
+summary(fit)
+
+```
+
+Win probabilities
+
+```{r}
+
+post <- spread_draws(fit, b_Intercept, b_BreakPoint, b_Tiebreaker)
+
+p_alpha <- inv_logit_scaled(post$b_Intercept)
+p_bp <- inv_logit_scaled(post$b_Intercept+post$b_BreakPoint)
+p_tb <- inv_logit_scaled(post$b_Intercept+post$b_Tiebreaker)
+
+mean(p_alpha)
+mean(p_bp)
+mean(p_tb)
+
+
+
+library(tidybayes)
+library(dplyr)
+library(ggplot2)
+
+post <- spread_draws(fit, b_Intercept, b_BreakPoint, b_Tiebreaker) %>%
+  mutate(
+    p_regular  = plogis(b_Intercept),
+    p_break    = plogis(b_Intercept + b_BreakPoint),
+    p_tiebreak = plogis(b_Intercept + b_Tiebreaker)
+  ) %>%
+  select(.draw, p_regular, p_break, p_tiebreak) %>%
+  pivot_longer(-.draw, names_to = "situation", values_to = "p")
+
+ggplot(post, aes(x = p, y = situation)) +
+  stat_pointinterval(.width = c(.5, .8, .95)) +
+  xlim(0, 1) +
+  labs(x = "P(server wins point)", y = NULL)
+```
+
+## MCMC Plots
+
+```{r}
+library(brms)
+
+# trace plots
+mcmc_plot(fit,
+          pars = c("b_Intercept", "b_BreakPoint", "b_Tiebreaker"),
+          type = "trace")
+
+# overlaid posterior densities by chain
+mcmc_plot(fit,
+          pars = c("b_Intercept", "b_BreakPoint", "b_Tiebreaker"),
+          type = "dens_overlay")
+
+```
+
+## Posterior predictive plots
+
+```{r}
+newdata <- data.frame(
+  Tiebreaker = 0,
+  BreakPoint = 1
+)
+
+ppd_break <- posterior_epred(
+  fit,
+  newdata = newdata
+  )
+
+ppd_reg <- posterior_epred(
+  fit,
+  newdata = df[sample(nrow(df), 1),]
+)
+
+ppd_tie <- posterior_epred(
+  fit,
+  newdata = data.frame(
+    Tiebreaker = 1,
+    BreakPoint = 0
+  )
+)
+
+preds <- data.frame(
+  p_reg = as.vector(ppd_reg),
+  p_break = as.vector(ppd_break),
+  p_tie = as.vector(ppd_tie)
+)
+```
+
+```{r}
+p <- ggplot(preds) + 
+  geom_density(
+    aes(p_reg, colour = 'Any point')
+  ) + geom_density(
+    aes(p_break, colour = 'Breakpoint')
+  ) + geom_density(
+    aes(p_tie, colour = 'Tiebreak')
+  ) +
+  xlab('Win probability') +
+  ylab('Density')
+p
+```
+
+## Posterior predictive plots 2 (using posterior_predict)
+
+```{r}
+# Posterior predictive draws of the *outcome* (0/1), not just p
+yrep <- posterior_predict(fit, newdata = df, ndraws = 500)
+
+```
+
+```{r}
+y_obs_bar  <- mean(df$ServerWon)
+yrep_bar   <- rowMeans(yrep)
+
+hist(yrep_bar, breaks = 40,
+     main = "Posterior predictive distribution of mean serve win rate",
+     xlab = "Mean ServerWon in replicated data")
+abline(v = y_obs_bar, col = "red", lwd = 2)
+```
+
+## Posterior predictive checks by situation
+
+```{r}
+is_reg  <- df$BreakPoint == 0 & df$Tiebreaker == 0
+is_bp   <- df$BreakPoint == 1
+is_tb   <- df$Tiebreaker == 1
+
+# Observed proportions
+obs_reg  <- mean(df$ServerWon[is_reg])
+obs_bp   <- mean(df$ServerWon[is_bp])
+obs_tb   <- mean(df$ServerWon[is_tb])
+
+# replicated proportions for each posterior draw
+rep_reg <- rowMeans(yrep[, is_reg, drop = FALSE])
+rep_bp  <- rowMeans(yrep[, is_bp,  drop = FALSE])
+rep_tb  <- rowMeans(yrep[, is_tb,  drop = FALSE])
+
+# simple base R plots
+par(mfrow = c(1, 3))
+
+hist(rep_reg, breaks = 30,
+     col = "lightskyblue2",
+     main = "Regular points",
+     xlab = "Mean ServerWon (rep)")
+abline(v = obs_reg, col = "red", lwd = 2)
+
+hist(rep_bp, breaks = 30,
+     col = "lightskyblue2",
+     main = "Break points",
+     xlab = "Mean ServerWon (rep)")
+abline(v = obs_bp, col = "red", lwd = 2)
+
+hist(rep_tb, breaks = 30,
+     col = "lightskyblue2",
+     main = "Tiebreak points",
+     xlab = "Mean ServerWon (rep)")
+abline(v = obs_tb, col = "red", lwd = 2)
+
+par(mfrow = c(1, 1))  # reset
+```
+
+## Additional convergence diagnostics
+
+Sampler diagnostics
+
+```{r}
+np <- nuts_params(fit)
+head(np)
+```
+
+Divergences
+
+```{r}
+divergences <- subset(np, Parameter == "divergent__" & Value == 1)
+n_div <- nrow(divergences)
+n_div
+```
+
+Max treedepth hits:
+
+```{r}
+treedepth_hits <- subset(np, Parameter == "treedepth__" & Value == max(Value))
+nrow(treedepth_hits)
+```
