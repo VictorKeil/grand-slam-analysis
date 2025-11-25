@@ -1,0 +1,148 @@
+---
+title: "Hierarchical Tennis Model 2 v1"
+format:
+  html:
+    toc: true
+    code-tools: true
+    code-line-numbers: true
+    number-sections: true
+    mainfont: Georgia, serif
+editor: source
+---
+
+```{r}
+if (!require(tidybayes)) {
+    install.packages("tidybayes")
+    library(tidybayes)
+}
+
+if (!require(tidyr)) {
+    install.packages("tidyr")
+    library(tidyr)
+}
+
+if (!require(brms)) {
+    install.packages("brms")
+    library(brms)
+}
+
+if(!require(ggplot2)) {
+  install.packages("ggplot2")
+  library(ggplot2)
+}
+
+if(!require(reliabilitydiag)) {
+  install.packages("reliabilitydiag")
+  library(reliabilitydiag)
+}
+
+
+if (!require(metadat)) {
+  install.packages("metadat")
+  library(metadat)
+}
+
+if(!require(cmdstanr)){
+    install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
+    library(cmdstanr)
+}
+cmdstan_installed <- function(){
+  res <- try(out <- cmdstanr::cmdstan_path(), silent = TRUE)
+  !inherits(res, "try-error")
+}
+if(!cmdstan_installed()){
+    install_cmdstan()
+}
+```
+
+```{r}
+data <- read.csv("master-sub.csv")
+
+head(data)
+```
+
+```{r}
+df <- data[c("ServerWon", "BreakPoint", "Tiebreaker", "PointServer", "player1id", "player2id")]
+
+df$ServerID <- ifelse(df$PointServer == 2,
+                      df$player2id,
+                      df$player1id)
+
+str(df$ServerWon)
+str(df$BreakPoint)
+str(df$Tiebreaker)
+str(df$ServerID)
+```
+
+```{r}
+fit_hier <- brm(
+  formula = ServerWon ~ BreakPoint + Tiebreaker +
+            (1 + BreakPoint + Tiebreaker | ServerID),
+  data    = df,
+  family  = bernoulli(link = "logit"),
+  prior   = c(
+    # standard intercept and slope
+    prior(normal(0, 2^2), class = "Intercept"),
+    prior(normal(0, 1^2),   class = "b"),
+    # hierarchical variation
+    prior(normal(0, 1),   class = "sd", group = "ServerID"),
+    # correlation between random effects
+    prior(lkj(2),         class = "cor", group = "ServerID")
+  ),
+  chains  = 4,
+  cores   = 4,
+  iter    = 2000
+)
+```
+
+```{r}
+
+summary(fit_hier)
+```
+
+```{r}
+newdata <- data.frame(
+  Tiebreaker = 0,
+  BreakPoint = 1,
+  ServerID = 1496
+)
+
+ppd_break <- posterior_epred(
+  fit_hier,
+  newdata = newdata
+  )
+
+ppd_reg <- posterior_epred(
+  fit_hier,
+  newdata = df[df$ServerID == 1496,][sample(1136, 1),]
+)
+
+ppd_tie <- posterior_epred(
+  fit_hier,
+  newdata = data.frame(
+    Tiebreaker = 1,
+    BreakPoint = 0,
+    ServerID = 1496
+  )
+)
+
+preds <- data.frame(
+  p_reg = as.vector(ppd_reg),
+  p_break = as.vector(ppd_break),
+  p_tie = as.vector(ppd_tie)
+)
+```
+
+```{r}
+p <- ggplot(preds) + 
+  geom_density(
+    aes(p_reg, colour = 'Any point')
+  ) + geom_density(
+    aes(p_break, colour = 'Breakpoint')
+  ) + geom_density(
+    aes(p_tie, colour = 'Tiebreak')
+  ) +
+  xlab('Win probability') +
+  ylab('Density')
+p
+```
