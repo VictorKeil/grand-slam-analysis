@@ -18,6 +18,11 @@ if (!require(tidybayes)) {
     library(tidybayes)
 }
 
+if (!require(tidyr)) {
+    install.packages("tidyr")
+    library(tidyr)
+}
+
 if (!require(brms)) {
     install.packages("brms")
     library(brms)
@@ -27,6 +32,12 @@ if(!require(ggplot2)) {
   install.packages("ggplot2")
   library(ggplot2)
 }
+
+if(!require(reliabilitydiag)) {
+  install.packages("reliabilitydiag")
+  library(reliabilitydiag)
+}
+
 
 if (!require(metadat)) {
   install.packages("metadat")
@@ -47,22 +58,21 @@ if(!cmdstan_installed()){
 ```
 
 ```{r}
-df <- read.csv("master-v1.csv")
+data <- read.csv("clean-data/master-sub.csv")
 
-head(df)
+head(data)
 ```
 
 Extract relevant data
 
 ```{r}
-df_main <- df[c("ServerWon", "BreakPoint", "Tiebreaker")]
-df_sample <- df_main[sample(nrow(df_main), nrow(df_main) / 3), ]
+df <- data[c("ServerWon", "BreakPoint", "Tiebreaker")]
 
-str(df_main$ServerWon)
-str(df_main$BreakPoint)
-str(df_main$Tiebreaker)
+str(df$ServerWon)
+str(df$BreakPoint)
+str(df$Tiebreaker)
 
-mean(na.omit(df_main$ServerWon))
+# mean(na.omit(df$ServerWon))
 ```
 
 Fit model
@@ -71,7 +81,7 @@ Fit model
 
 fit <- brm(
     formula = ServerWon ~ BreakPoint + Tiebreaker,
-    data = df_main,
+    data = df,
     family = bernoulli(link = "logit"),
     prior = c(
       prior(normal(0,2^2), class = "Intercept"),
@@ -82,33 +92,6 @@ fit <- brm(
     cores = 4
 )
 
-```
-
-Subset:
-
-```{r}
-fit_sample <- brm(
-    formula = ServerWon ~ BreakPoint + Tiebreaker,
-    data = df_sample,
-    family = bernoulli(link = "logit"),
-    prior = c(
-      prior(normal(0,2^2), class = "Intercept"),
-      prior(normal(0,1^2), class = "b")
-    ),
-    chains = 2,
-    iter = 1000,
-    cores = 2
-)
-```
-
-```{r}
-summary(fit_sample)
-```
-
-pp_check for sample
-
-```{r}
-pp_check(fit_sample)
 ```
 
 Checking results
@@ -154,6 +137,7 @@ ggplot(post, aes(x = p, y = situation)) +
   labs(x = "P(server wins point)", y = NULL)
 ```
 
+
 MCMC Plots
 
 ```{r}
@@ -174,6 +158,51 @@ mcmc_plot(fit,
 Posterior predictive plots
 
 ```{r}
+newdata <- data.frame(
+  Tiebreaker = 0,
+  BreakPoint = 1
+)
+
+ppd_break <- posterior_epred(
+  fit,
+  newdata = newdata
+  )
+
+ppd_reg <- posterior_epred(
+  fit,
+  newdata = df[sample(nrow(df), 1),]
+)
+
+ppd_tie <- posterior_epred(
+  fit,
+  newdata = data.frame(
+    Tiebreaker = 1,
+    BreakPoint = 0
+  )
+)
+
+preds <- data.frame(
+  p_reg = as.vector(ppd_reg),
+  p_break = as.vector(ppd_break),
+  p_tie = as.vector(ppd_tie)
+)
+```
+
+```{r}
+p <- ggplot(preds) + 
+  geom_density(
+    aes(p_reg, colour = 'Any point')
+  ) + geom_density(
+    aes(p_break, colour = 'Breakpoint')
+  ) + geom_density(
+    aes(p_tie, colour = 'Tiebreak')
+  ) +
+  xlab('Win probability') +
+  ylab('Density')
+p
+```
+
+```{r}
 # compare observed vs predicted proportion of 1's
 pp_check(fit, type = "bars")          # barplot of y vs yrep
 
@@ -184,3 +213,13 @@ pp_check(fit, type = "stat", stat = "mean")
 pp_check(fit, type = "hist")
 
 ```
+
+```{r}
+pp_check(fit, type = "stat", stat = "mean")
+```
+
+```{r}
+pp_check(fit, type = "bars")
+```
+
+
