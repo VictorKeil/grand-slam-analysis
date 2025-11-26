@@ -222,4 +222,19 @@ pp_check(fit, type = "stat", stat = "mean")
 pp_check(fit, type = "bars")
 ```
 
+```{r}
+drel <- df[sample(nrow(df), 10000),]
+
+pp_y <- posterior_epred(
+  fit,
+  newdata = drel,
+)
+pp_y <- colMeans(pp_y)
+```
+
+```{r}
+plot(reliabilitydiag(p = pp_y, y = drel$ServerWon)) +
+  xlim(0.55, 0.65) +
+  ylim(0, 0.7)
+```
 

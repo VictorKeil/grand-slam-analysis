@@ -56,28 +56,24 @@ if(!cmdstan_installed()){
 ```
 
 ```{r}
-data <- read.csv("master-sub.csv")
+data <- read.csv("../clean-data/master-sub.csv")
 
 head(data)
 ```
 
 ```{r}
-df <- data[c("ServerWon", "BreakPoint", "Tiebreaker", "PointServer", "player1id", "player2id")]
-
-df$ServerID <- ifelse(df$PointServer == 2,
-                      df$player2id,
-                      df$player1id)
+df <- data[c("ServerWon", "BreakPoint", "Tiebreaker", "PointServer", "player1id", "player2id", "ServerId")]
 
 str(df$ServerWon)
 str(df$BreakPoint)
 str(df$Tiebreaker)
-str(df$ServerID)
+str(df$ServerId)
 ```
 
 ```{r}
 fit_hier <- brm(
-  formula = ServerWon ~ BreakPoint + Tiebreaker +
-            (1 + BreakPoint + Tiebreaker | ServerID),
+  formula = ServerWon ~ BreakPoint +
+            (1 + BreakPoint | ServerId),
   data    = df,
   family  = bernoulli(link = "logit"),
   prior   = c(
@@ -85,9 +81,8 @@ fit_hier <- brm(
     prior(normal(0, 2^2), class = "Intercept"),
     prior(normal(0, 1^2),   class = "b"),
     # hierarchical variation
-    prior(normal(0, 1),   class = "sd", group = "ServerID"),
-    # correlation between random effects
-    prior(lkj(2),         class = "cor", group = "ServerID")
+    prior(student_t(3, 0, 2.5),   class = "sd", group = "ServerId")
+    # prior(lkj(2),         class = "cor", group = "ServerId")
   ),
   chains  = 4,
   cores   = 4,
@@ -96,15 +91,16 @@ fit_hier <- brm(
 ```
 
 ```{r}
-
 summary(fit_hier)
 ```
 
 ```{r}
+player_id <- 623
+
 newdata <- data.frame(
   Tiebreaker = 0,
   BreakPoint = 1,
-  ServerID = 1496
+  ServerId = df$ServerId
 )
 
 ppd_break <- posterior_epred(
@@ -114,35 +110,43 @@ ppd_break <- posterior_epred(
 
 ppd_reg <- posterior_epred(
   fit_hier,
-  newdata = df[df$ServerID == 1496,][sample(1136, 1),]
 )
 
-ppd_tie <- posterior_epred(
-  fit_hier,
-  newdata = data.frame(
-    Tiebreaker = 1,
-    BreakPoint = 0,
-    ServerID = 1496
-  )
-)
+# ppd_tie <- posterior_epred(
+#   fit_hier,
+#   newdata = data.frame(
+#     Tiebreaker = 1,
+#     BreakPoint = 0,
+#     ServerId = df$ServerId
+#     # ServerId = player_id
+#   )
+# )
 
 preds <- data.frame(
-  p_reg = as.vector(ppd_reg),
-  p_break = as.vector(ppd_break),
-  p_tie = as.vector(ppd_tie)
+  p_reg = colMeans(ppd_reg),
+  p_break = colMeans(ppd_break),
+  ServerId = df$ServerId
 )
 ```
 
 ```{r}
-p <- ggplot(preds) + 
+preds1 <- preds[df$ServerId == 351,]
+
+p <- ggplot(preds1) + 
   geom_density(
     aes(p_reg, colour = 'Any point')
   ) + geom_density(
     aes(p_break, colour = 'Breakpoint')
-  ) + geom_density(
-    aes(p_tie, colour = 'Tiebreak')
   ) +
+  # facet_wrap(~ ServerId) +
   xlab('Win probability') +
   ylab('Density')
 p
 ```
+```{r}
+np <- nuts_params(fit)
+divergences <- subset(np, Parameter == "divergent__" & Value == 1)
+n_div <- nrow(divergences)
+n_div
+```
+
