@@ -58,7 +58,7 @@ if(!cmdstan_installed()){
 ```
 
 ```{r}
-data <- read.csv("master-sub.csv")
+data <- read.csv("../clean-data/master-sub.csv")
 
 head(data)
 ```
@@ -304,7 +304,7 @@ fit_probs <- plogis(linpred)   # length = nrow(df)
 # reliability diagram for all points
 rd_all <- reliabilitydiag(fit_probs, y = df$ServerWon)
 autoplot(rd_all, type = "miscalibration") +
-  coord_cartesian(xlim = c(0.55, 0.65))
+  coord_cartesian(xlim = c(0.58, 0.7))
 ```
 
 ## ROC Plot

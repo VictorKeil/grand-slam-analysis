@@ -103,7 +103,7 @@ summary(fit_hier)
 all_ids <- intersect(players$id, df$ServerId)
 op <- players[players$id %in% all_ids,]
 op <- op[order(op$no_matches, decreasing = TRUE),]
-idx = seq(1,9)
+idx = seq(1,4)
 player_ids <- op$id[idx]
 
 newdata <- data.frame(
@@ -165,6 +165,22 @@ p <- ggplot(preds) +
   ylab('Density')
 p
 ```
+
+```{r}
+ests <- ranef(fit_hier, probs=c(0.05,0.95))
+str_ids <- paste(player_ids)
+wp = inv_logit_scaled(0.63 + ests$ServerId[, "Estimate", "Intercept"])
+bpwp = inv_logit_scaled(0.63 -0.14 + ests$ServerId[, "Estimate", "Intercept"] + ests$ServerId[, "Estimate", "BreakPoint"])
+
+pln <- vector("character", max(players$id))
+pln[players$id] = players$player
+
+diffs <- bpwp - wp
+names(diffs) <- pln[as.integer(names(diffs))]
+
+```
+
+
 ```{r}
 np <- nuts_params(fit)
 divergences <- subset(np, Parameter == "divergent__" & Value == 1)
