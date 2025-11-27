@@ -56,6 +56,11 @@ if(!cmdstan_installed()){
 ```
 
 ```{r}
+players <- read.csv("../clean-data/players.csv")
+```
+
+
+```{r}
 data <- read.csv("../clean-data/master-sub.csv")
 
 head(data)
@@ -95,12 +100,12 @@ summary(fit_hier)
 ```
 
 ```{r}
-player_id <- 623
+player_ids <- sample(unique(df$ServerId), 10)
 
 newdata <- data.frame(
   Tiebreaker = 0,
   BreakPoint = 1,
-  ServerId = df$ServerId
+  ServerId = player_ids
 )
 
 ppd_break <- posterior_epred(
@@ -110,35 +115,48 @@ ppd_break <- posterior_epred(
 
 ppd_reg <- posterior_epred(
   fit_hier,
+  newdata = data.frame(
+    Tiebreaker = 0,
+    BreakPoint = 0,
+    ServerId = player_ids
+  )
 )
 
-# ppd_tie <- posterior_epred(
-#   fit_hier,
-#   newdata = data.frame(
-#     Tiebreaker = 1,
-#     BreakPoint = 0,
-#     ServerId = df$ServerId
-#     # ServerId = player_id
-#   )
-# )
+df_reg <- as.data.frame(ppd_reg)
+colnames(df_reg) <- player_ids
+df_reg <- df_reg |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "ServerId",
+    values_to = "ppd"
+  )
+
+df_break <- as.data.frame(ppd_break)
+colnames(df_break) <- player_ids
+df_break <- df_break |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "ServerId",
+    values_to = "ppd"
+  )
 
 preds <- data.frame(
-  p_reg = colMeans(ppd_reg),
-  p_break = colMeans(ppd_break),
-  ServerId = df$ServerId
+  p_reg = df_reg$ppd,
+  p_break = df_break$ppd,
+  ServerId = factor(df_reg$ServerId,
+                    levels = players$id,
+                    labels = players$player)
 )
 ```
 
 ```{r}
-preds1 <- preds[df$ServerId == 351,]
-
-p <- ggplot(preds1) + 
+p <- ggplot(preds) + 
   geom_density(
     aes(p_reg, colour = 'Any point')
   ) + geom_density(
     aes(p_break, colour = 'Breakpoint')
   ) +
-  # facet_wrap(~ ServerId) +
+  facet_wrap(~ ServerId) +
   xlab('Win probability') +
   ylab('Density')
 p
