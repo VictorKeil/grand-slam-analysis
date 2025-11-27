@@ -100,7 +100,11 @@ summary(fit_hier)
 ```
 
 ```{r}
-player_ids <- sample(unique(df$ServerId), 10)
+all_ids <- intersect(players$id, df$ServerId)
+op <- players[players$id %in% all_ids,]
+op <- op[order(op$no_matches, decreasing = TRUE),]
+idx = seq(1,9)
+player_ids <- op$id[idx]
 
 newdata <- data.frame(
   Tiebreaker = 0,
