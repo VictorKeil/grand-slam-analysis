@@ -283,3 +283,79 @@ Max treedepth hits:
 treedepth_hits <- subset(np, Parameter == "treedepth__" & Value == max(Value))
 nrow(treedepth_hits)
 ```
+
+## Reliabilitydiag
+
+```{r}
+library(brms)
+library(reliabilitydiag)
+
+# posterior mean coefficients
+b <- fixef(fit)  # rows: "Intercept", "BreakPoint", "Tiebreaker"
+
+b0   <- b["Intercept",  "Estimate"]
+b_bp <- b["BreakPoint", "Estimate"]
+b_tb <- b["Tiebreaker","Estimate"]
+
+# predicted win prob for each point (plug-in logistic regression)
+linpred   <- b0 + b_bp * df$BreakPoint + b_tb * df$Tiebreaker
+fit_probs <- plogis(linpred)   # length = nrow(df)
+
+# reliability diagram for all points
+rd_all <- reliabilitydiag(fit_probs, y = df$ServerWon)
+autoplot(rd_all, type = "miscalibration") +
+  coord_cartesian(xlim = c(0.55, 0.65))
+```
+
+## ROC Plot
+
+```{r}
+## ROC Plot
+
+# install/load pROC if needed
+if (!require(pROC)) {
+  install.packages("pROC")
+  library(pROC)
+}
+
+# posterior mean (plug-in) predictions: P(ServerWon = 1 | BreakPoint, Tiebreaker)
+b <- fixef(fit)  # rows: "Intercept", "BreakPoint", "Tiebreaker"
+
+b0   <- b["Intercept",  "Estimate"]
+b_bp <- b["BreakPoint", "Estimate"]
+b_tb <- b["Tiebreaker", "Estimate"]
+
+linpred   <- b0 + b_bp * df$BreakPoint + b_tb * df$Tiebreaker
+fit_probs <- plogis(linpred)  # predicted probabilities for each point
+
+# ROC object
+roc_obj <- roc(response = df$ServerWon,
+               predictor = fit_probs,
+               quiet = TRUE)
+
+# base ROC plot with AUC
+plot(roc_obj,
+     main = "ROC curve for non-hierarchical model",
+     xlab = "False positive rate (1 - specificity)",
+     ylab = "True positive rate (sensitivity)")
+text(0.6, 0.1,
+     labels = paste0("AUC = ", round(auc(roc_obj), 3)))
+
+```
+
+## PSIS–LOO
+
+```{r}
+loo_fit <- loo(fit, ndraws = 1000)
+loo_fit
+```
+
+## LOO-PIT-ECDF
+
+```{r}
+pp_check(
+fit,
+type = "loo_pit_ecdf", # LOO-PIT ECDF calibration check
+ndraws = 500 # you can adjust if you like
+)
+```
