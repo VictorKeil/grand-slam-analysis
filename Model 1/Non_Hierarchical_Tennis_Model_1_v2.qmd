@@ -1,5 +1,5 @@
 ---
-title: "Non Hierarchical Tennis Model 1 v1"
+title: "Non Hierarchical Tennis Model 1 v2"
 format:
   html:
     toc: true
@@ -358,4 +358,195 @@ fit,
 type = "loo_pit_ecdf", # LOO-PIT ECDF calibration check
 ndraws = 500 # you can adjust if you like
 )
+```
+
+## Sensitivity Analysis (3 other scenarios)
+
+```{r}
+library(brms)
+
+## three alternative priors
+
+prior_narrow <- c(
+  prior(normal(0, 1^2),   class = "Intercept"),
+  prior(normal(0, 0.5^2), class = "b")
+)
+
+prior_wide <- c(
+  prior(normal(0, 5^2), class = "Intercept"),
+  prior(normal(0, 2^2), class = "b")
+)
+
+
+# Center the intercept at p0 ≈ 0.615
+p0     <- 0.615
+mu_int <- qlogis(p0)   # logit(0.615)
+#mu_int =~ 0.468
+
+prior_inform <- c(
+  prior(normal(0.468, 0.2^2), class = "Intercept"),
+  prior(normal(0,      0.4^2), class = "b")
+)
+
+## refit models with the new priors
+
+fit_narrow <- brm(
+  formula = ServerWon ~ BreakPoint + Tiebreaker,
+  data    = df,
+  family  = bernoulli(link = "logit"),
+  prior   = prior_narrow,
+  chains  = 4,
+  iter    = 2000,
+  cores   = 4
+)
+
+fit_wide <- brm(
+  formula = ServerWon ~ BreakPoint + Tiebreaker,
+  data    = df,
+  family  = bernoulli(link = "logit"),
+  prior   = prior_wide,
+  chains  = 4,
+  iter    = 2000,
+  cores   = 4
+)
+
+
+fit_inform <- brm(
+  formula = ServerWon ~ BreakPoint + Tiebreaker,
+  data    = df,
+  family  = bernoulli(link = "logit"),
+  prior   = prior_inform,
+  chains  = 4,
+  iter    = 2000,
+  cores   = 4
+)
+
+```
+
+#### Summaries of the four fits
+
+```{r}
+summary(fit)
+summary(fit_narrow)
+summary(fit_wide)
+summary(fit_inform)
+```
+
+#### Plot win probabilities
+
+```{r}
+library(tidybayes)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+post_base <- spread_draws(fit, b_Intercept, b_BreakPoint, b_Tiebreaker) %>%
+  mutate(model = "original")
+
+post_narrow <- spread_draws(fit_narrow, b_Intercept, b_BreakPoint, b_Tiebreaker) %>%
+  mutate(model = "narrow")
+
+post_wide <- spread_draws(fit_wide, b_Intercept, b_BreakPoint, b_Tiebreaker) %>%
+  mutate(model = "wide")
+
+post_inform <- spread_draws(fit_inform, b_Intercept, b_BreakPoint, b_Tiebreaker) %>%
+  mutate(model = "informative")
+
+post_all <- bind_rows(post_base, post_narrow, post_wide, post_inform) %>%
+  mutate(
+    p_regular  = plogis(b_Intercept),
+    p_break    = plogis(b_Intercept + b_BreakPoint),
+    p_tiebreak = plogis(b_Intercept + b_Tiebreaker)
+  ) %>%
+  select(.draw, model, p_regular, p_break, p_tiebreak) %>%
+  pivot_longer(cols = starts_with("p_"),
+               names_to = "situation",
+               values_to = "p")
+
+# numeric comparison
+post_all %>%
+  group_by(model, situation) %>%
+  summarise(
+    mean = mean(p),
+    l95  = quantile(p, 0.025),
+    u95  = quantile(p, 0.975),
+    .groups = "drop"
+  )
+
+# simple plot
+ggplot(post_all, aes(x = p, y = situation, colour = model)) +
+  stat_pointinterval(.width = c(0.5, 0.95),
+                     position = position_dodge(width = 0.4)) +
+  xlim(0, 1) +
+  labs(x = "P(server wins point)", y = NULL,
+       title = "Sensitivity to prior choice (including informative prior)")
+
+```
+
+#### Plot posterior densities for each
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# ensure a consistent order of scenarios in the legend
+post_all$model <- factor(post_all$model,
+                         levels = c("original", "narrow", "wide", "informative"))
+
+# Any point
+post_reg <- filter(post_all, situation == "p_regular")
+ggplot(post_reg, aes(x = p, colour = model)) +
+  geom_density() +
+  labs(x = "Win probability",
+       y = "Density",
+       colour = "Scenario",
+       title = "Any point")
+
+# Break point
+post_break <- filter(post_all, situation == "p_break")
+ggplot(post_break, aes(x = p, colour = model)) +
+  geom_density() +
+  labs(x = "Win probability",
+       y = "Density",
+       colour = "Scenario",
+       title = "Break point")
+
+# Tiebreak
+post_tie <- filter(post_all, situation == "p_tiebreak")
+ggplot(post_tie, aes(x = p, colour = model)) +
+  geom_density() +
+  labs(x = "Win probability",
+       y = "Density",
+       colour = "Scenario",
+       title = "Tiebreak")
+
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+post_all$model <- factor(post_all$model,
+                         levels = c("original", "narrow", "wide", "informative"))
+
+post_all_plot <- post_all %>%
+  filter(situation %in% c("p_regular", "p_break", "p_tiebreak")) %>%
+  mutate(
+    situation = recode(
+      situation,
+      p_regular = "Any point",
+      p_break   = "Breakpoint",
+      p_tiebreak = "Tiebreak"
+    )
+  )
+
+ggplot(post_all_plot, aes(x = p, colour = model)) +
+  geom_density() +
+  facet_wrap(~ situation, nrow = 1, scales = "free") +
+  labs(
+    x = "Win probability",
+    y = "Density",
+    colour = "Scenario"
+  )
+
 ```
