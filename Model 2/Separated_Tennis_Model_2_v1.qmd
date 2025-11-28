@@ -78,7 +78,7 @@ str(df$ServerId)
 ```{r}
 fit_hier <- brm(
   formula = ServerWon ~ BreakPoint +
-            (1 + BreakPoint | ServerId),
+            (1 + BreakPoint + Tiebreaker | ServerId),
   data    = df,
   family  = bernoulli(link = "logit"),
   prior   = c(
@@ -86,7 +86,7 @@ fit_hier <- brm(
     prior(normal(0, 2^2), class = "Intercept"),
     prior(normal(0, 1^2),   class = "b"),
     # hierarchical variation
-    prior(student_t(3, 0, 2.5),   class = "sd", group = "ServerId")
+    prior(student_t(3, 0, 2.5),class = "sd", group = "ServerId")
     # prior(lkj(2),         class = "cor", group = "ServerId")
   ),
   chains  = 4,
@@ -99,66 +99,91 @@ fit_hier <- brm(
 summary(fit_hier)
 ```
 
+## Plot PPD
+
 ```{r}
-all_ids <- intersect(players$id, df$ServerId)
-op <- players[players$id %in% all_ids,]
-op <- op[order(op$no_matches, decreasing = TRUE),]
-idx = seq(1,4)
-player_ids <- op$id[idx]
 
-newdata <- data.frame(
-  Tiebreaker = 0,
-  BreakPoint = 1,
-  ServerId = player_ids
-)
-
-ppd_break <- posterior_epred(
-  fit_hier,
-  newdata = newdata
+make_preds <- function(this_fit) {
+  all_ids <- intersect(players$id, df$ServerId)
+  op <- players[players$id %in% all_ids,]
+  op <- op[order(op$no_matches, decreasing = TRUE),]
+  idx = seq(1,12)
+  player_ids <- op$id[idx]
+  
+  ppd_reg <- posterior_epred(
+    this_fit,
+    newdata = data.frame(
+      Tiebreaker = 0,
+      BreakPoint = 0,
+      ServerId = player_ids
+    )
   )
-
-ppd_reg <- posterior_epred(
-  fit_hier,
-  newdata = data.frame(
-    Tiebreaker = 0,
-    BreakPoint = 0,
-    ServerId = player_ids
+  
+  ppd_break <- posterior_epred(
+    this_fit,
+    newdata = data.frame(
+      Tiebreaker = 0,
+      BreakPoint = 1,
+      ServerId = player_ids
+    )
   )
-)
-
-df_reg <- as.data.frame(ppd_reg)
-colnames(df_reg) <- player_ids
-df_reg <- df_reg |>
-  pivot_longer(
-    cols = everything(),
-    names_to = "ServerId",
-    values_to = "ppd"
+  
+  ppd_tie <- posterior_epred(
+    this_fit,
+    newdata = data.frame(
+      Tiebreaker = 1,
+      BreakPoint = 0,
+      ServerId = player_ids
+    )
   )
-
-df_break <- as.data.frame(ppd_break)
-colnames(df_break) <- player_ids
-df_break <- df_break |>
-  pivot_longer(
-    cols = everything(),
-    names_to = "ServerId",
-    values_to = "ppd"
+  
+  df_reg <- as.data.frame(ppd_reg)
+  colnames(df_reg) <- player_ids
+  df_reg <- df_reg |>
+    pivot_longer(
+      cols = everything(),
+      names_to = "ServerId",
+      values_to = "ppd"
+    )
+  
+  df_break <- as.data.frame(ppd_break)
+  colnames(df_break) <- player_ids
+  df_break <- df_break |>
+    pivot_longer(
+      cols = everything(),
+      names_to = "ServerId",
+      values_to = "ppd"
+    )
+  
+  df_tie <- as.data.frame(ppd_tie)
+  colnames(df_tie) <- player_ids
+  df_tie <- df_tie |>
+    pivot_longer(
+      cols = everything(),
+      names_to = "ServerId",
+      values_to = "ppd"
+    )
+  
+  preds <- data.frame(
+    p_reg = df_reg$ppd,
+    p_break = df_break$ppd,
+    p_tie = df_tie$ppd,
+    ServerId = factor(df_reg$ServerId,
+                      levels = players$id,
+                      labels = players$player)
   )
-
-preds <- data.frame(
-  p_reg = df_reg$ppd,
-  p_break = df_break$ppd,
-  ServerId = factor(df_reg$ServerId,
-                    levels = players$id,
-                    labels = players$player)
-)
+}
 ```
 
 ```{r}
+preds <- make_preds(fit_hier)
 p <- ggplot(preds) + 
   geom_density(
     aes(p_reg, colour = 'Any point')
   ) + geom_density(
     aes(p_break, colour = 'Breakpoint')
+  ) + geom_density(
+    aes(p_tie, colour = 'Tiebreak')
   ) +
   facet_wrap(~ ServerId) +
   xlab('Win probability') +
@@ -197,14 +222,16 @@ nrow(treedepth_hits)
 library(brms)
 library(reliabilitydiag)
 
+this_fit <- fit_reg
+
 # posterior mean coefficients
-b <- fixef(fit_hier)  # rows: "Intercept", "BreakPoint", "Tiebreaker"
+b <- fixef(this_fit)  # rows: "Intercept", "BreakPoint", "Tiebreaker"
 
 b0   <- b["Intercept",  "Estimate"]
 b_bp <- b["BreakPoint", "Estimate"]
 
 # population level parameter estimates
-ests <- ranef(fit_hier, probs=c(0.05,0.95))
+ests <- ranef(this_fit, probs=c(0.05,0.95))
 str_ids <- paste(df$ServerId)
 grp0 <- ests$ServerId[str_ids, "Estimate", "Intercept"]
 grp_bp <- ests$ServerId[str_ids, "Estimate", "BreakPoint"]
@@ -216,7 +243,10 @@ fit_probs <- plogis(linpred)   # length = nrow(df)
 # reliability diagram for all points
 rd_all <- reliabilitydiag(fit_probs, y = df$ServerWon)
 autoplot(rd_all, type = "miscalibration") +
-  coord_cartesian(xlim = range(fit_probs))
+  coord_cartesian(
+    xlim = range(fit_probs),
+    ylim = c(0,0.8)
+    )
 ```
 
 ## ROC Plot
@@ -277,3 +307,74 @@ type = "loo_pit_ecdf", # LOO-PIT ECDF calibration check
 ndraws = 500 # you can adjust if you like
 )
 ```
+
+# Sensitivity analysis
+
+```{r}
+priors_reg <- c(
+    prior(normal(0, 2),   class = "Intercept"),
+    prior(normal(0, 0.5), class = "b"),
+    prior(exponential(1), class = "sd", group = "ServerId"),
+    prior(lkj(2), class = "cor", group = "ServerId")
+)
+fit_reg <- update(fit_hier, prior = priors_reg, refresh = 0)
+
+priors_weak <- c(
+  prior(normal(0, 10),  class = "Intercept"),
+  prior(normal(0, 5),   class = "b"),
+  prior(student_t(3, 0, 5), class = "sd", group = "ServerId")
+)
+fit_weak <- update(fit_hier, prior = priors_weak, refresh = 0)
+
+priors_robust <- c(
+  prior(student_t(3, 0, 2.5), class = "Intercept"),
+  prior(student_t(3, 0, 2.5), class = "b"),
+  prior(student_t(3, 0, 2.5), class = "sd", group = "ServerId"),
+  prior(lkj(2), class = "cor", group = "ServerId")
+)
+
+fit_robust <- update(fit_hier, prior = priors_robust, refresh = 0)
+
+```
+
+```{r}
+fits <- list(
+  original = fit_hier,
+  narrow = fit_reg,
+  wide = fit_weak,
+  robust = fit_robust
+)
+
+all_preds <- imap_dfr(fits, ~ mutate(make_preds(.x), model = .y))
+```
+
+```{r}
+
+plt_reg <- ggplot(all_preds, aes(x = p_reg, colour = model)) + 
+  geom_density() +
+  facet_wrap(~ ServerId) +
+  xlab('Win probability') +
+  ylab('Density') +
+  labs(title = 'Any point')
+plt_reg
+
+plt_break <- ggplot(all_preds, aes(x = p_break, colour = model)) + 
+  geom_density() +
+  facet_wrap(~ ServerId) +
+  xlab('Win probability') +
+  ylab('Density') +
+  labs(title = 'Break point')
+plt_break
+
+plt_tie <- ggplot(all_preds, aes(x = p_tie, colour = model)) + 
+  geom_density() +
+  facet_wrap(~ ServerId) +
+  xlab('Win probability') +
+  ylab('Density') +
+  labs(title = 'Tiebreak')
+
+plt_tie
+
+
+```
+
