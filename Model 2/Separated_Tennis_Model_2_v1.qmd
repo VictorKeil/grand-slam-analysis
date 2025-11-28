@@ -166,25 +166,114 @@ p <- ggplot(preds) +
 p
 ```
 
-```{r}
-ests <- ranef(fit_hier, probs=c(0.05,0.95))
-str_ids <- paste(player_ids)
-wp = inv_logit_scaled(0.63 + ests$ServerId[, "Estimate", "Intercept"])
-bpwp = inv_logit_scaled(0.63 -0.14 + ests$ServerId[, "Estimate", "Intercept"] + ests$ServerId[, "Estimate", "BreakPoint"])
 
-pln <- vector("character", max(players$id))
-pln[players$id] = players$player
+## Additional convergence diagnostics
 
-diffs <- bpwp - wp
-names(diffs) <- pln[as.integer(names(diffs))]
-
-```
-
+Sampler diagnostics
 
 ```{r}
 np <- nuts_params(fit)
+head(np)
+```
+
+Divergences
+
+```{r}
 divergences <- subset(np, Parameter == "divergent__" & Value == 1)
 n_div <- nrow(divergences)
 n_div
 ```
 
+Max treedepth hits:
+
+```{r}
+treedepth_hits <- subset(np, Parameter == "treedepth__" & Value == max(Value))
+nrow(treedepth_hits)
+```
+
+## Reliabilitydiag
+
+```{r}
+library(brms)
+library(reliabilitydiag)
+
+# posterior mean coefficients
+b <- fixef(fit_hier)  # rows: "Intercept", "BreakPoint", "Tiebreaker"
+
+b0   <- b["Intercept",  "Estimate"]
+b_bp <- b["BreakPoint", "Estimate"]
+
+# population level parameter estimates
+ests <- ranef(fit_hier, probs=c(0.05,0.95))
+str_ids <- paste(df$ServerId)
+grp0 <- ests$ServerId[str_ids, "Estimate", "Intercept"]
+grp_bp <- ests$ServerId[str_ids, "Estimate", "BreakPoint"]
+
+# predicted win prob for each point (plug-in logistic regression)
+linpred   <- b0 + b_bp * df$BreakPoint + grp0 + grp_bp * df$BreakPoint
+fit_probs <- plogis(linpred)   # length = nrow(df)
+
+# reliability diagram for all points
+rd_all <- reliabilitydiag(fit_probs, y = df$ServerWon)
+autoplot(rd_all, type = "miscalibration") +
+  coord_cartesian(xlim = c(0.5, 0.73))
+```
+
+## ROC Plot
+
+```{r}
+## ROC Plot
+
+# install/load pROC if needed
+if (!require(pROC)) {
+  install.packages("pROC")
+  library(pROC)
+}
+
+# posterior mean coefficients
+b <- fixef(fit_hier)  # rows: "Intercept", "BreakPoint", "Tiebreaker"
+
+b0   <- b["Intercept",  "Estimate"]
+b_bp <- b["BreakPoint", "Estimate"]
+
+# population level parameter estimates
+ests <- ranef(fit_hier, probs=c(0.05,0.95))
+str_ids <- paste(df$ServerId)
+grp0 <- ests$ServerId[str_ids, "Estimate", "Intercept"]
+grp_bp <- ests$ServerId[str_ids, "Estimate", "BreakPoint"]
+
+# predicted win prob for each point (plug-in logistic regression)
+linpred   <- b0 + b_bp * df$BreakPoint + grp0 + grp_bp * df$BreakPoint
+fit_probs <- plogis(linpred)   # length = nrow(df)
+
+# ROC object
+roc_obj <- roc(response = df$ServerWon,
+               predictor = fit_probs,
+               quiet = TRUE)
+
+# base ROC plot with AUC
+plot(roc_obj,
+     main = "ROC curve for non-hierarchical model",
+     xlab = "False positive rate (1 - specificity)",
+     ylab = "True positive rate (sensitivity)")
+text(0.6, 0.1,
+     labels = paste0("AUC = ", round(auc(roc_obj), 3)))
+
+```
+
+## PSIS–LOO
+
+```{r}
+loo_fit <- loo(fit_hier, ndraws = 1000)
+loo_fit
+```
+
+## LOO-PIT-ECDF
+
+```{r}
+pp_check(
+fit_hier,
+type = "loo_pit_ecdf", # LOO-PIT ECDF calibration check
+ndraws = 500 # you can adjust if you like
+)
+```
