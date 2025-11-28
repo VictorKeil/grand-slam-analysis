@@ -304,7 +304,7 @@ fit_probs <- plogis(linpred)   # length = nrow(df)
 # reliability diagram for all points
 rd_all <- reliabilitydiag(fit_probs, y = df$ServerWon)
 autoplot(rd_all, type = "miscalibration") +
-  coord_cartesian(xlim = c(0.58, 0.7))
+  coord_cartesian(xlim = c(min(fit_probs) - 0.01, max(fit_probs) + 0.01))
 ```
 
 ## ROC Plot
@@ -477,7 +477,7 @@ post_all %>%
 ggplot(post_all, aes(x = p, y = situation, colour = model)) +
   stat_pointinterval(.width = c(0.5, 0.95),
                      position = position_dodge(width = 0.4)) +
-  xlim(0, 1) +
+  xlim(0.5, 0.8) +
   labs(x = "P(server wins point)", y = NULL,
        title = "Sensitivity to prior choice (including informative prior)")
 

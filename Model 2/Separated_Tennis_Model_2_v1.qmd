@@ -216,7 +216,7 @@ fit_probs <- plogis(linpred)   # length = nrow(df)
 # reliability diagram for all points
 rd_all <- reliabilitydiag(fit_probs, y = df$ServerWon)
 autoplot(rd_all, type = "miscalibration") +
-  coord_cartesian(xlim = c(0.5, 0.73))
+  coord_cartesian(xlim = range(fit_probs))
 ```
 
 ## ROC Plot
