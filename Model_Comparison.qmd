@@ -1,0 +1,178 @@
+---
+title: "Tennis Models LOO Comparison"
+format:
+  html:
+    toc: false
+    code-tools: true
+    code-line-numbers: true
+    mainfont: Georgia, serif
+editor: source
+---
+
+## load packages
+
+```{r}
+if (!require(tidybayes)) {
+install.packages("tidybayes")
+library(tidybayes)
+}
+
+if (!require(tidyr)) {
+install.packages("tidyr")
+library(tidyr)
+}
+
+if (!require(brms)) {
+install.packages("brms")
+library(brms)
+}
+
+if (!require(ggplot2)) {
+install.packages("ggplot2")
+library(ggplot2)
+}
+
+if (!require(reliabilitydiag)) {
+install.packages("reliabilitydiag")
+library(reliabilitydiag)
+}
+
+if (!require(metadat)) {
+install.packages("metadat")
+library(metadat)
+}
+
+if (!require(cmdstanr)) {
+install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
+library(cmdstanr)
+}
+
+cmdstan_installed <- function() {
+res <- try(out <- cmdstanr::cmdstan_path(), silent = TRUE)
+!inherits(res, "try-error")
+}
+if (!cmdstan_installed()) {
+install_cmdstan()
+}
+```
+
+# data
+
+```{r}
+data <- read.csv("master-sub.csv")
+
+str(data$ServerWon)
+str(data$BreakPoint)
+str(data$Tiebreaker)
+str(data$ServerId)
+```
+
+# keep relevant data
+
+```{r}
+df <- data[c("ServerWon", "BreakPoint", "Tiebreaker", "ServerId")]
+head(df)
+```
+
+# Model 1
+
+```{r}
+fit_nonhier <- brm(
+formula = ServerWon ~ BreakPoint + Tiebreaker,
+data = df,
+family = bernoulli(link = "logit"),
+prior = c(
+prior(normal(0, 2^2), class = "Intercept"),
+prior(normal(0, 1^2), class = "b")
+),
+chains = 4,
+iter = 2000,
+cores = 4
+)
+
+```
+
+```{r}
+summary(fit_nonhier)
+```
+
+# Model 2
+
+```{r}
+fit_hier <- brm(
+formula = ServerWon ~ BreakPoint +
+(1 + BreakPoint | ServerId),
+data = df,
+family = bernoulli(link = "logit"),
+prior = c(
+prior(normal(0, 2^2), class = "Intercept"),
+prior(normal(0, 1^2), class = "b"),
+prior(student_t(3, 0, 2.5), class = "sd", group = "ServerId")
+# prior(lkj(2), class = "cor", group = "ServerId") # uncomment if you want a prior on correlations
+),
+chains = 4,
+iter = 2000,
+cores = 4
+)
+```
+
+```{r}
+summary(fit_hier)
+```
+
+# Psis-loo comparison
+
+```{r}
+loo_nonhier <- loo(fit_nonhier, ndraws = 1000)
+loo_hier <- loo(fit_hier, ndraws = 1000)
+
+loo_nonhier
+loo_hier
+```
+
+# direct comparison
+
+```{r}
+cmp <- loo_compare(loo_nonhier, loo_hier)
+cmp
+```
+
+# plot
+
+```{r}
+# 1 row, 2 columns, with space for a shared outer title
+par(mfrow = c(1, 2),
+    mar  = c(4, 4, 2, 1),   # inner margins (bottom, left, top, right)
+    oma  = c(0, 0, 3, 0))   # outer margins (space for overall title)
+
+# No big 'main' titles here
+plot(loo_nonhier, main = "")
+mtext("Non-hierarchical model", side = 3, line = 0.3, cex = 0.9)
+
+plot(loo_hier, main = "")
+mtext("Hierarchical model", side = 3, line = 0.3, cex = 0.9)
+
+# One shared title on top of both panels
+mtext("PSIS diagnostic plots", outer = TRUE, side = 3, line = 1, cex = 1.2, font = 2)
+
+# Optional: reset
+par(mfrow = c(1, 1), oma = c(0, 0, 0, 0))
+
+```
+
+# Numerical khat
+
+```{r}
+
+# vector of k-hat values
+k_nonhier <- loo_nonhier$diagnostics$pareto_k
+k_hier    <- loo_hier$diagnostics$pareto_k
+
+# quick summaries
+summary(k_nonhier)
+summary(k_hier)
+
+# counts in the usual bins
+loo::pareto_k_table(loo_nonhier)
+loo::pareto_k_table(loo_hier)
+```
