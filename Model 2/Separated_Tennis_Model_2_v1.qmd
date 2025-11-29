@@ -10,6 +10,10 @@ format:
 editor: source
 ---
 
+# Setup
+
+## Install packages
+
 ```{r}
 if (!require(tidybayes)) {
     install.packages("tidybayes")
@@ -55,6 +59,15 @@ if(!cmdstan_installed()){
 }
 ```
 
+## Configure ggplot
+
+```{r}
+theme_set(theme_bw())
+```
+
+
+# Fit model
+
 ```{r}
 players <- read.csv("../clean-data/players.csv")
 ```
@@ -99,6 +112,8 @@ fit_hier <- brm(
 summary(fit_hier)
 ```
 
+# Analyse model
+
 ## Plot PPD
 
 ```{r}
@@ -107,8 +122,7 @@ make_preds <- function(this_fit) {
   all_ids <- intersect(players$id, df$ServerId)
   op <- players[players$id %in% all_ids,]
   op <- op[order(op$no_matches, decreasing = TRUE),]
-  idx = seq(1,12)
-  player_ids <- op$id[idx]
+  player_ids <- op$id
   
   ppd_reg <- posterior_epred(
     this_fit,
@@ -164,16 +178,25 @@ make_preds <- function(this_fit) {
       values_to = "ppd"
     )
   
+  ids_by_perf <- group_by(df_reg, ServerId) %>%
+    summarise(wp = mean(ppd), .groups = "keep") %>%
+    arrange(desc(wp)) %>%
+    left_join(mutate(players, id = as.character(id)), 
+              by = join_by(ServerId == id))
+  
+  df_reg$ServerId <- factor(df_reg$ServerId,
+                            levels = ids_by_perf$ServerId,
+                            labels = ids_by_perf$player)
   preds <- data.frame(
     p_reg = df_reg$ppd,
     p_break = df_break$ppd,
     p_tie = df_tie$ppd,
-    ServerId = factor(df_reg$ServerId,
-                      levels = players$id,
-                      labels = players$player)
+    ServerId = df_reg$ServerId
   )
 }
 ```
+
+### Density plot
 
 ```{r}
 preds <- make_preds(fit_hier)
@@ -191,6 +214,40 @@ p <- ggplot(preds) +
 p
 ```
 
+### Point estimates plot
+
+```{r}
+lpreds <- preds %>%
+  pivot_longer(
+    cols = starts_with("p_"),
+    names_to = "situation",
+    values_to = "p"
+  )
+
+lpreds$situation <- factor(lpreds$situation,
+                           levels = c("p_break", "p_reg", "p_tie"),
+                           labels = c("Breakpoint", "Any point", "Tiebreaker")
+                           )
+
+colors <- scales::hue_pal()(3)
+colors[1:2] <- colors[2:1]
+
+ggplot(lpreds, aes(x = p, 
+                   y = ServerId, 
+                   color = situation
+                   )) +
+  stat_pointinterval(
+    .width = c(0.5, 95),
+    position = position_dodge(width = 0.6),
+  ) +
+  # scale_color_manual(values = c(cc[2], cc[1], cc[3])) +
+  labs(
+    title = "Win probability of server at different points",
+  ) +
+  xlab("Point win probability") +
+  ylab("Server")
+
+```
 
 ## Additional convergence diagnostics
 
