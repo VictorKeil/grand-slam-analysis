@@ -62,7 +62,7 @@ if(!cmdstan_installed()){
 ## Configure ggplot
 
 ```{r}
-theme_set(theme_bw())
+theme_set(theme_gray())
 ```
 
 
@@ -90,7 +90,7 @@ str(df$ServerId)
 
 ```{r}
 fit_hier <- brm(
-  formula = ServerWon ~ BreakPoint +
+  formula = ServerWon ~ BreakPoint + Tiebreaker +
             (1 + BreakPoint + Tiebreaker | ServerId),
   data    = df,
   family  = bernoulli(link = "logit"),
