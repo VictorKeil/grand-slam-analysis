@@ -62,7 +62,7 @@ if(!cmdstan_installed()){
 ## Configure ggplot
 
 ```{r}
-theme_set(theme_gray())
+theme_set(theme_bw())
 ```
 
 
@@ -99,7 +99,7 @@ fit_hier <- brm(
     prior(normal(0, 2^2), class = "Intercept"),
     prior(normal(0, 1^2),   class = "b"),
     # hierarchical variation
-    prior(student_t(3, 0, 2.5),class = "sd", group = "ServerId")
+    prior(student_t(3, 0, 2.5), class = "sd", group = "ServerId")
     # prior(lkj(2),         class = "cor", group = "ServerId")
   ),
   chains  = 4,
@@ -118,11 +118,16 @@ summary(fit_hier)
 
 ```{r}
 
-make_preds <- function(this_fit, n_players) {
+make_preds <- function(this_fit, n_players = -1) {
   all_ids <- intersect(players$id, df$ServerId)
   op <- players[players$id %in% all_ids,]
   op <- op[order(op$no_matches, decreasing = TRUE),]
-  idx = 1:n_players
+  
+  idx <- if(n_players < 0) {
+    nrow(op)
+  } else {
+    1:n_players
+  }
   player_ids <- op$id[idx]
   
   ppd_reg <- posterior_epred(
@@ -218,7 +223,7 @@ p
 ### Point estimates plot
 
 ```{r}
-lpreds <- make_preds(fit_hier, 20) %>%
+lpreds <- make_preds(fit_hier, 10) %>%
   pivot_longer(
     cols = starts_with("p_"),
     names_to = "situation",
@@ -233,21 +238,22 @@ lpreds$situation <- factor(lpreds$situation,
 colors <- scales::hue_pal()(3)
 colors[1:2] <- colors[2:1]
 
-ggplot(lpreds, aes(x = p, 
+plt <- ggplot(lpreds, aes(x = p, 
                    y = ServerId, 
                    color = situation
                    )) +
   stat_pointinterval(
-    .width = c(0.5, 95),
+    .width = c(0.5, 0.95),
     position = position_dodge(width = 0.6),
   ) +
   scale_color_manual(values = c(cc[2], cc[1], cc[3])) +
   labs(
     title = "Win probability of server at different points",
+    color = "Point type",
   ) +
   xlab("Point win probability") +
   ylab("Server")
-
+plt
 ```
 
 ## Additional convergence diagnostics
@@ -300,7 +306,7 @@ fit_probs <- plogis(linpred)   # length = nrow(df)
 
 # reliability diagram for all points
 rd_all <- reliabilitydiag(fit_probs, y = df$ServerWon)
-autoplot(rd_all, type = "miscalibration") +
+plt <- autoplot(rd_all, type = "miscalibration") +
   coord_cartesian(
     xlim = range(fit_probs),
     ylim = c(0,0.8)
@@ -403,7 +409,7 @@ fits <- list(
   robust = fit_robust
 )
 
-all_preds <- imap_dfr(fits, ~ mutate(make_preds(.x), model = .y))
+all_preds <- imap_dfr(fits, ~ mutate(make_preds(.x, 1), model = .y))
 ```
 
 ```{r}

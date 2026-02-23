@@ -169,7 +169,10 @@ ppd_break <- posterior_epred(
 
 ppd_reg <- posterior_epred(
   fit,
-  newdata = df[sample(nrow(df), 1),]
+  newdata = data.frame(
+    Tiebreaker = 0,
+    BreakPoint = 0
+  )
 )
 
 ppd_tie <- posterior_epred(
@@ -188,16 +191,27 @@ preds <- data.frame(
 ```
 
 ```{r}
+point_types <- factor(c(1,2,3),
+  labels = c(
+    'Regular point',
+    'Breakpoint',
+    'Tiebreak'
+  )
+)
+
 p <- ggplot(preds) + 
   geom_density(
-    aes(p_reg, colour = 'Any point')
+    aes(p_reg, colour = point_types[1])
   ) + geom_density(
-    aes(p_break, colour = 'Breakpoint')
+    aes(p_break, colour = point_types[2])
   ) + geom_density(
-    aes(p_tie, colour = 'Tiebreak')
+    aes(p_tie, colour = point_types[3])
   ) +
   xlab('Win probability') +
-  ylab('Density')
+  ylab('Density') +
+  labs(
+    color = "Point type"
+  )
 p
 ```
 
@@ -303,7 +317,7 @@ fit_probs <- plogis(linpred)   # length = nrow(df)
 
 # reliability diagram for all points
 rd_all <- reliabilitydiag(fit_probs, y = df$ServerWon)
-autoplot(rd_all, type = "miscalibration") +
+plt <- autoplot(rd_all, type = "miscalibration") +
   coord_cartesian(xlim = c(min(fit_probs) - 0.01, max(fit_probs) + 0.01))
 ```
 
